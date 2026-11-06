@@ -64,8 +64,40 @@ def amount_usd(text):
     return best
 
 
+def set_output(**kv):
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a") as f:
+            for k, v in kv.items():
+                f.write(f"{k}={v}\n")
+
+
+def open_alert(h):
+    issue = api(f"/repos/{OWN_REPO}/issues", method="POST", body={
+        "title": f"Bounty: ${h['usd']} {h['repo']} - {h['title'][:70]}",
+        "assignees": [OWNER],
+        "body": (f"@{OWNER} new bounty, move fast.\n\n{h['url']}\n\nAmount: ${h['usd']}\n"
+                 f"Language: {h['lang']} ({h['stars']} stars)\nComments so far: {h['comments']}\n"
+                 f"Posted: {h['created']}\nOpen competing PRs: 0\n\n"
+                 "Claude is working on it now and will comment here when done."),
+    })
+    return (issue or {}).get("number", "")
+
+
 def main():
-    since = (datetime.now(timezone.utc) - timedelta(hours=HOURS_BACK)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    force = os.environ.get("FORCE_URL", "").strip()
+    if force:  # manual test: skip the scan and solve this issue
+        m = re.match(r"https://github\.com/([^/]+/[^/]+)/issues/(\d+)", force)
+        if not m:
+            print("FORCE_URL must be a GitHub issue link")
+            return
+        h = {"url": force, "repo": m.group(1), "title": f"(test) issue #{m.group(2)}", "usd": 0,
+             "lang": "?", "stars": "?", "comments": "?", "created": "?"}
+        set_output(bounty_url=force, alert_issue=open_alert(h) if OWN_REPO else "")
+        print("TEST", force)
+        return
+
+    since =(datetime.now(timezone.utc) - timedelta(hours=HOURS_BACK)).strftime("%Y-%m-%dT%H:%M:%SZ")
     queries = [
         f"label:bounty is:issue is:open created:>={since}",
         f'label:"💎 Bounty" is:issue is:open created:>={since}',
@@ -111,19 +143,14 @@ def main():
     if not hits:
         print("NONE")
         return
-    for h in hits:
-        line = f"${h['usd']} | {h['repo']} ({h['lang']}, {h['stars']} stars) | {h['title']}"
-        print(line)
+    hits.sort(key=lambda h: -h["usd"])
+    for n, h in enumerate(hits):
+        print(f"${h['usd']} | {h['repo']} ({h['lang']}, {h['stars']} stars) | {h['title']}")
         if DRY_RUN or not OWN_REPO:
             continue
-        api(f"/repos/{OWN_REPO}/issues", method="POST", body={
-            "title": f"Bounty: ${h['usd']} {h['repo']} - {h['title'][:70]}",
-            "assignees": [OWNER],
-            "body": (f"@{OWNER} new bounty, move fast.\n\n{h['url']}\n\nAmount: ${h['usd']}\n"
-                     f"Language: {h['lang']} ({h['stars']} stars)\nComments so far: {h['comments']}\n"
-                     f"Posted: {h['created']}\nOpen competing PRs: 0\n\n"
-                     "Tell Claude: money making 2, then paste this link."),
-        })
+        alert = open_alert(h)
+        if n == 0:  # Claude solves the best one; the rest are alerts only
+            set_output(bounty_url=h["url"], alert_issue=alert)
 
 
 if __name__ == "__main__":

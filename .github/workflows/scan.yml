@@ -5,25 +5,67 @@ on:
     - cron: "*/5 * * * *"   # every 5 minutes, the fastest GitHub allows
     - cron: "0 12 1 * *"    # monthly keep-alive so GitHub doesn't pause the schedule
   workflow_dispatch:
+    inputs:
+      test_url:
+        description: "Optional: a GitHub issue link to solve right now (for testing)"
+        required: false
 
 permissions:
   issues: write
   contents: write
-
-concurrency:
-  group: bounty-scan
-  cancel-in-progress: false
 
 jobs:
   scan:
     if: github.event.schedule != '0 12 1 * *'
     runs-on: ubuntu-latest
     timeout-minutes: 4
+    concurrency:
+      group: bounty-scan
+      cancel-in-progress: false
+    outputs:
+      bounty_url: ${{ steps.scan.outputs.bounty_url }}
+      alert_issue: ${{ steps.scan.outputs.alert_issue }}
     steps:
       - uses: actions/checkout@v4
-      - run: python3 scan.py
+      - id: scan
+        run: python3 scan.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_URL: ${{ inputs.test_url }}
+
+  # Runs only when the scan found a bounty, so quiet runs use no Claude usage.
+  solve:
+    needs: scan
+    if: needs.scan.outputs.bounty_url != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: bounty-solve
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Louis's GitHub identity
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          login=$(gh api user --jq .login)
+          id=$(gh api user --jq .id)
+          git config --global user.name "$login"
+          git config --global user.email "$id+$login@users.noreply.github.com"
+          gh auth setup-git
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.BOT_PAT }}
+          claude_args: '--max-turns 80 --allowedTools "Bash,Read,Write,Edit,Glob,Grep"'
+          prompt: |
+            Follow SOLVE.md in this repository exactly.
+            BOUNTY_URL: ${{ needs.scan.outputs.bounty_url }}
+            ALERT_ISSUE: ${{ needs.scan.outputs.alert_issue }}
+            WATCH_REPO: ${{ github.repository }}
+            AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT || 'false' }}
 
   keepalive:
     if: github.event.schedule == '0 12 1 * *'
