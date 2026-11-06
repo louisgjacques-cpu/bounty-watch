@@ -101,7 +101,7 @@ jobs:
             BOUNTY_URL: ${{ needs.scan.outputs.bounty_url }}
             ALERT_ISSUE: ${{ needs.scan.outputs.alert_issue }}
             WATCH_REPO: ${{ github.repository }}
-            AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT || 'true' }}
+            AUTO_SUBMIT: ${{ inputs.test_url != '' && 'false' || (vars.AUTO_SUBMIT || 'true') }}
 
   keepalive:
     if: github.event.schedule == '0 12 1 * *'
