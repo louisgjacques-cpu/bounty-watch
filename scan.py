@@ -14,6 +14,7 @@ HOURS_BACK = int(os.environ.get("HOURS_BACK", "2"))
 OWNER = OWN_REPO.split("/")[0] if OWN_REPO else ""
 
 MIN_USD = 50
+MAX_SOLVES_PER_DAY = 3  # protects Claude usage limits; extra hits still get an alert
 MAX_COMMENTS = 3
 MIN_STARS = 20
 LANGS = {"Python", "TypeScript", "JavaScript", "Go", "Rust", "Java", "Ruby", "PHP", "C#", "Kotlin", "Swift", "Dart", "Shell", "HTML", "CSS", "MDX", "Vue", "Svelte", "Elixir", "Scala"}
@@ -109,9 +110,13 @@ def main():
             items[i["html_url"]] = i
 
     already = set()
+    solves_today = 0
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
     if OWN_REPO and not DRY_RUN:
         for i in api(f"/repos/{OWN_REPO}/issues", {"state": "all", "per_page": 100}) or []:
             already.update(re.findall(r"https://github\.com/\S+/issues/\d+", i.get("body") or ""))
+            if i["title"].startswith("Bounty:") and i["created_at"] > day_ago:
+                solves_today += 1
 
     hits = []
     for url, i in items.items():
@@ -149,7 +154,7 @@ def main():
         if DRY_RUN or not OWN_REPO:
             continue
         alert = open_alert(h)
-        if n == 0:  # Claude solves the best one; the rest are alerts only
+        if n == 0 and solves_today < MAX_SOLVES_PER_DAY:  # Claude solves the best one; the rest are alerts only
             set_output(bounty_url=h["url"], alert_issue=alert)
 
 

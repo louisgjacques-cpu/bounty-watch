@@ -25,6 +25,7 @@ jobs:
     outputs:
       bounty_url: ${{ steps.scan.outputs.bounty_url }}
       alert_issue: ${{ steps.scan.outputs.alert_issue }}
+      pr_url: ${{ steps.followup.outputs.pr_url }}
     steps:
       - uses: actions/checkout@v4
       - id: scan
@@ -32,6 +33,41 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE_URL: ${{ inputs.test_url }}
+      - id: followup
+        run: python3 followup.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Runs only when one of Louis's bounty PRs has new maintainer feedback or failing checks.
+  respond:
+    needs: scan
+    if: needs.scan.outputs.pr_url != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: bounty-respond
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Louis's GitHub identity
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          login=$(gh api user --jq .login)
+          id=$(gh api user --jq .id)
+          git config --global user.name "$login"
+          git config --global user.email "$id+$login@users.noreply.github.com"
+          gh auth setup-git
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.BOT_PAT }}
+          claude_args: '--max-turns 50 --allowedTools "Bash,Read,Write,Edit,Glob,Grep"'
+          prompt: |
+            Follow RESPOND.md in this repository exactly.
+            PR_URL: ${{ needs.scan.outputs.pr_url }}
 
   # Runs only when the scan found a bounty, so quiet runs use no Claude usage.
   solve:
@@ -65,7 +101,7 @@ jobs:
             BOUNTY_URL: ${{ needs.scan.outputs.bounty_url }}
             ALERT_ISSUE: ${{ needs.scan.outputs.alert_issue }}
             WATCH_REPO: ${{ github.repository }}
-            AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT || 'false' }}
+            AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT || 'true' }}
 
   keepalive:
     if: github.event.schedule == '0 12 1 * *'

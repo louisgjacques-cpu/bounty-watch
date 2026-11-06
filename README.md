@@ -6,8 +6,10 @@ Checks GitHub every 5 minutes for fresh, real-money bounties with no competing p
 
 1. The scan finds a bounty and opens an alert issue here. Your phone pings.
 2. Claude runs inside GitHub Actions on your Claude plan. It forks the project, makes the fix, runs the tests and pushes a branch to your fork. If it can't do a clean job, it comments "Skipped" with the reason instead.
-3. Review mode (the default): Claude comments on the alert with a one-tap link that opens the pull request with everything filled in, plus the `/attempt` comment to post first.
-   Auto mode: set the repository variable `AUTO_SUBMIT` to `true` (Settings → Secrets and variables → Actions → Variables) and Claude posts the claim and opens the PR itself, under your name, without you reviewing it.
+3. Auto mode (the default): Claude posts the `/attempt` claim and opens the pull request itself, under your name, with `/claim` for Algora.
+   Review mode: set the repository variable `AUTO_SUBMIT` to `false` (Settings → Secrets and variables → Actions → Variables). Claude then comments on the alert with a one-tap link to open the PR yourself.
+4. Every 5 minutes it also checks your open bounty PRs. When a maintainer comments or a check fails, Claude makes the changes, pushes them and replies. It stops after 3 rounds on the same PR.
+5. At most 3 bounties a day get solved, to protect your Claude usage. Extra hits still get an alert.
 
 ## Secrets this needs
 
